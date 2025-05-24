@@ -1,0 +1,61 @@
+# Common editor swap files
+*.swp
+*.swo
+*.swh
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Log files (if any are stored within the project, though default is ~/.cache)
+*.log
+
+# Cache directories (if any are stored within the project)
+.cache/
+*.cache/
+
+# Specific Zif Framework cache if ever created in project
+zif_framework/app.log
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.pytest_cache/
+
+# Node specific
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# IDE specific
+.idea/
+.vscode/
+*.iml
+*.project
+*.classpath
+*.cproject
+.settings/
+
+# Build output
+build/
+dist/
+out/
+target/
+
+# Other
+*.bak
+*.tmp
+*.old
