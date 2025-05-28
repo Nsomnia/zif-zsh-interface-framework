@@ -25,18 +25,22 @@ widget_draw_button() {
     local is_selected="$4" # Currently "true" or "false"
 
     local display_text
-    local attr_id
+    local fg_color bg_color attributes_string
+
     if [[ "$is_selected" == "true" ]]; then
-        # For selected buttons, add brackets and set attribute
+        # Selected button style: reverse video
         display_text="[ $text ]"
-        attr_id="button_selected" # Conceptual attribute ID
+        fg_color="default" 
+        bg_color="default" 
+        attributes_string="reverse"
     else
-        # For non-selected buttons, display text as is, but the spec asks for [X] for quit button
-        # For consistency and to match the quit button spec, let's use brackets for now
+        # Normal button style
         display_text="[${text}]"
-        attr_id="button_normal"   # Conceptual attribute ID
+        fg_color="default"
+        bg_color="default"
+        attributes_string=""
     fi
 
-    # Call the render_draw_text function from renderer.zsh, now passing the attribute ID
-    render_draw_text "$y" "$x" "$display_text" "$attr_id"
+    # Call the updated render_draw_text function
+    render_draw_text "$y" "$x" "$display_text" "$fg_color" "$bg_color" "$attributes_string"
 }

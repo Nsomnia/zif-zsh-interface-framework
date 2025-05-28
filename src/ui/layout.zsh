@@ -29,8 +29,8 @@ layout_get_top_bar_dims() {
     LAYOUT_TOP_BAR_Y=0
     LAYOUT_TOP_BAR_X=0
     LAYOUT_TOP_BAR_H=3
-    # STTY_COLS is a zsh/curses variable holding terminal width
-    LAYOUT_TOP_BAR_W=${STTY_COLS:-80} # Default to 80 if STTY_COLS is not set
+    # COLS is a global variable provided by zsh/curses after `zcurses init`.
+    LAYOUT_TOP_BAR_W=${COLS:-80} # Default to 80 if COLS is not set (e.g., if called before zcurses init)
 }
 
 # Function: layout_draw_top_bar_frame
@@ -40,7 +40,8 @@ layout_get_top_bar_dims() {
 #   then uses render_draw_box to draw the top bar's border.
 layout_draw_top_bar_frame() {
     layout_get_top_bar_dims # Ensure dimensions are calculated and set
-    render_draw_box "$LAYOUT_TOP_BAR_Y" "$LAYOUT_TOP_BAR_X" "$LAYOUT_TOP_BAR_H" "$LAYOUT_TOP_BAR_W"
+    # Draw top bar border with specific style: blue foreground
+    render_draw_box "$LAYOUT_TOP_BAR_Y" "$LAYOUT_TOP_BAR_X" "$LAYOUT_TOP_BAR_H" "$LAYOUT_TOP_BAR_W" "blue" "default" ""
 }
 
 # Function: layout_draw_top_bar_content
@@ -76,5 +77,6 @@ layout_draw_top_bar_content() {
     fi
 
     # Coordinates are y=1 (middle of top bar height 3), x calculated above
-    render_draw_text 1 "$title_x" "$title"
+    # Draw title with specific style: yellow foreground, bold
+    render_draw_text 1 "$title_x" "$title" "yellow" "default" "bold"
 }

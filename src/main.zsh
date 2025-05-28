@@ -24,31 +24,32 @@ source "$(dirname "$0")/core/logging.zsh"
 source "$(dirname "$0")/core/screen_buffer.zsh"
 
 # Load zsh/curses module for TUI capabilities
-zmodload zsh/curses
+zmodload zsh/curses || { echo "Error: zsh/curses module could not be loaded." >&2; return 1; }
 
 # Function to clean up curses environment on exit
 cleanup_curses() {
     log_info "Application shutting down..."
     echo "Restoring terminal..."
-    zcurses_clear # Ensure terminal is cleared on exit
-    zcurses_exit
+    zcurses clear stdscr # Clear the screen
+    zcurses end          # End curses mode
 }
 
 # Setup trap to call cleanup_curses on script exit
 trap cleanup_curses EXIT
 
 # Initialize curses environment
-zcurses_init
-zcurses_mouse_on # Enable mouse events
-log_info "Application starting..."
-log_info "Mouse support enabled."
-# Initialize the screen buffer with terminal dimensions
-screen_buffer_init "$STTY_ROWS" "$STTY_COLS"
+zcurses init
+log_info "Curses initialized. LINES=$LINES, COLS=$COLS"
+# Initialize the screen buffer with terminal dimensions (now uses $LINES and $COLS directly)
+screen_buffer_init
 
 # Main event loop for the TUI
 main_loop() {
     log_debug "Entered main loop."
-    local char
+    local ZIF_INPUT_CHAR
+    local ZIF_INPUT_KEYNAME
+    typeset -a ZIF_INPUT_MOUSEDATA # Ensure it's an array for mouse data
+
     while state_app_is_running; do
         # Clear the current screen buffer for the new frame
         screen_buffer_clear_current
@@ -59,26 +60,27 @@ main_loop() {
         # Draw the content of the top bar (title and quit button)
         layout_draw_top_bar_content
 
-        # Display current focus for debugging (will be changed to use buffer later)
+        # Display current focus for debugging
         local current_focus_for_display
         current_focus_for_display=$(state_get_current_focus_id)
-        render_draw_text 0 20 "Focus: $current_focus_for_display          " # Pad with spaces to clear previous longer text
+        # Pad with spaces to clear previous longer text. Use specific style.
+        render_draw_text 0 20 "Focus: $current_focus_for_display          " "green" "black" ""
         
         # Render the differences from the buffer to the screen
         render_diff_and_draw
+        
+        # Set input timeout and read input
+        zcurses timeout stdscr 100
+        zcurses input stdscr ZIF_INPUT_CHAR ZIF_INPUT_KEYNAME ZIF_INPUT_MOUSEDATA
 
-        # Get character input with a 100ms timeout
-        # This allows the loop to iterate for periodic updates/animations in the future.
-        char=$(zcurses_getch -t 100)
-
-        if [[ -n "$char" ]]; then
-            log_debug "Key pressed: $char"
-            # Process the keypress event only if a key was actually pressed
-            event_process_keypress "$char"
+        if [[ -n "$ZIF_INPUT_CHAR" || -n "$ZIF_INPUT_KEYNAME" ]]; then
+            log_debug "Input received: char='${ZIF_INPUT_CHAR}', keyname='${ZIF_INPUT_KEYNAME}', mouse_data=(${ZIF_INPUT_MOUSEDATA[*]})_{empty_array_fix}"
+            # Pass to event processor
+            event_process_keypress "$ZIF_INPUT_CHAR" "$ZIF_INPUT_KEYNAME" "${ZIF_INPUT_MOUSEDATA[@]}"
         else
-            # Timeout occurred, no key pressed.
-            # Future periodic tasks could be run here.
-            : # Placeholder for now
+            # Timeout occurred, no input
+            # This is where periodic background tasks could run
+            : # No-op or log_debug "Input timeout"
         fi
     done
 }

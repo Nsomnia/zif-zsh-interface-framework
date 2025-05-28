@@ -13,51 +13,61 @@ typeset -gA ZIF_SCREEN_CURRENT_BUFFER
 typeset -gA ZIF_SCREEN_PREVIOUS_BUFFER
 
 # Function: screen_buffer_init
-# Purpose: Initializes or re-initializes the screen buffers.
-# Arguments:
-#   $1 (rows): The number of rows for the screen buffer.
-#   $2 (cols): The number of columns for the screen buffer.
+# Purpose: Initializes or re-initializes the screen buffers using global LINES and COLS.
 # Details:
 #   Clears and then populates both CURRENT and PREVIOUS buffers with " :normal".
+#   Uses global $LINES and $COLS variables provided by zsh/curses after `zcurses init`.
 screen_buffer_init() {
-    local rows="$1"
-    local cols="$2"
     local y x
+
+    if [[ -z "$LINES" || -z "$COLS" ]]; then
+        log_error "screen_buffer_init: LINES or COLS not set. Cannot initialize buffer."
+        # Optionally, set default small size or return error
+        # For now, proceed but log this critical issue.
+        # This function relies on zcurses init having set these globals.
+        return 1
+    fi
 
     # Clear existing buffers
     ZIF_SCREEN_CURRENT_BUFFER=()
     ZIF_SCREEN_PREVIOUS_BUFFER=()
+    
+    # Default cell format: "char:fg_color:bg_color:attributes_list"
+    local default_cell_value=" :default:default:" # Space, default fg, default bg, no attributes
 
-    for ((y = 0; y < rows; y++)); do
-        for ((x = 0; x < cols; x++)); do
-            ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]=" :normal"
-            ZIF_SCREEN_PREVIOUS_BUFFER["$y,$x"]=" :normal" # Initialize previous buffer to a known state
+    for ((y = 0; y < LINES; y++)); do
+        for ((x = 0; x < COLS; x++)); do
+            ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]="$default_cell_value"
+            ZIF_SCREEN_PREVIOUS_BUFFER["$y,$x"]="$default_cell_value" # Initialize previous buffer
         done
     done
-    log_info "Screen buffer initialized with ${rows}x${cols}"
+    log_info "Screen buffer initialized with ${LINES}x${COLS}. Default cell: '$default_cell_value'"
 }
 
 # Function: screen_buffer_set_cell
-# Purpose: Sets the character and attribute for a cell in the current screen buffer.
+# Purpose: Sets the character, colors, and attributes for a cell in the current screen buffer.
 # Arguments:
 #   $1 (y): The row coordinate.
 #   $2 (x): The column coordinate.
 #   $3 (char): The character to place in the cell (should be a single character).
-#   $4 (attr_id): Optional. The attribute ID for the character (e.g., "normal", "highlight"). Defaults to "normal".
+#   $4 (fg_color): Optional. Foreground color. Defaults to "default".
+#   $5 (bg_color): Optional. Background color. Defaults to "default".
+#   $6 (attributes_string): Optional. Comma-separated string of attributes (e.g., "bold,underline"). Defaults to "".
 screen_buffer_set_cell() {
     local y="$1"
     local x="$2"
     local char="$3"
-    local attr_id="${4:-normal}" # Default to "normal" if not provided
+    local fg_color="${4:-default}"
+    local bg_color="${5:-default}"
+    local attributes_string="${6:-}" # Defaults to empty string
 
-    # Basic validation for char length (optional, but good practice)
+    # Basic validation for char length
     if (( ${#char} != 1 )); then
         log_warn "screen_buffer_set_cell: char argument must be a single character. Received: '$char'"
-        # Decide on handling: truncate, use a placeholder, or skip. For now, skip update.
         return 1
     fi
 
-    ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]="$char:$attr_id"
+    ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]="$char:$fg_color:$bg_color:$attributes_string"
 }
 
 # Function: screen_buffer_get_cell
@@ -80,44 +90,66 @@ screen_buffer_get_cell() {
 #   Iterates through all screen cells. If a cell in CURRENT_BUFFER differs from
 #   PREVIOUS_BUFFER, it's drawn to the screen, and PREVIOUS_BUFFER is updated.
 #   Finally, calls zcurses_refresh to display all changes.
-#   Assumes STTY_ROWS and STTY_COLS are available from zsh/curses.
+#   Uses global $LINES and $COLS variables.
 render_diff_and_draw() {
     local y x
     local current_cell_value previous_cell_value
     local char attr_id
 
-    # STTY_ROWS and STTY_COLS are provided by zsh/curses
-    # Ensure they are available, otherwise default or log error
-    if [[ -z "$STTY_ROWS" || -z "$STTY_COLS" ]]; then
-        log_error "render_diff_and_draw: STTY_ROWS or STTY_COLS not set. Cannot render."
+    # Ensure LINES and COLS are available
+    if [[ -z "$LINES" || -z "$COLS" ]]; then
+        log_error "render_diff_and_draw: LINES or COLS not set. Cannot render."
         return 1
     fi
 
-    for ((y = 0; y < STTY_ROWS; y++)); do
-        for ((x = 0; x < STTY_COLS; x++)); do
+    for ((y = 0; y < LINES; y++)); do
+        for ((x = 0; x < COLS; x++)); do
             current_cell_value="${ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]}"
             previous_cell_value="${ZIF_SCREEN_PREVIOUS_BUFFER["$y,$x"]}"
 
             if [[ "$current_cell_value" != "$previous_cell_value" ]]; then
-                # Parse "char:attr_id"
-                # Zsh parameter expansion: ${string%%pat} remove longest suffix, ${string#pat} remove shortest prefix
-                char="${current_cell_value[1]}" # First character of the value string
-                attr_id="${current_cell_value#*:}" # Substring after the first colon
+                # Parse "char:fg_color:bg_color:attributes_list"
+                local char fg bg attrs_str
+                IFS=: read -r char fg bg attrs_str <<< "$current_cell_value"
+                # Note: If attributes_string can be empty, read might behave unexpectedly for the last var.
+                # A more robust parsing if attrs_str can be empty:
+                # char="${current_cell_value%%:*}"
+                # local temp1="${current_cell_value#*:}"
+                # fg="${temp1%%:*}"
+                # local temp2="${temp1#*:}"
+                # bg="${temp2%%:*}"
+                # attrs_str="${temp2#*:}" # This will be empty if no fourth colon
 
-                # Placeholder for attribute handling based on attr_id
-                # Example: if [[ "$attr_id" == "highlight" ]]; then zcurses_attr_on curses_standout; fi
-                # For now, just draw the character.
+                # Reset attributes and colors first (simplest approach for now)
+                # `default/default` resets colors. Attributes need explicit reset.
+                zcurses attr stdscr default/default
+                zcurses attr stdscr -bold -underline -reverse -standout -dim -blink # Turn off all known attributes
 
-                zcurses_move "$y" "$x"
-                zcurses_putc "$char" # Use zcurses_putc for single characters
+                # Apply new colors
+                if [[ -n "$fg" && -n "$bg" ]]; then # Ensure fg and bg are not empty
+                    zcurses attr stdscr "$fg/$bg"
+                fi
 
-                # if [[ "$attr_id" == "highlight" ]]; then zcurses_attr_off curses_standout; fi
+                # Apply new text attributes
+                if [[ -n "$attrs_str" ]]; then
+                    local -a attrs_array
+                    attrs_array=(${(s:,:)attrs_str})
+                    local attr
+                    for attr in "${attrs_array[@]}"; do
+                        if [[ -n "$attr" ]]; then # Ensure attribute name is not empty
+                            zcurses attr stdscr "+$attr"
+                        fi
+                    done
+                fi
+                
+                zcurses move "$y" "$x"
+                zcurses char stdscr -- "$char" # Draw the single character
                 
                 ZIF_SCREEN_PREVIOUS_BUFFER["$y,$x"]="$current_cell_value"
             fi
         done
     done
-    zcurses_refresh
+    zcurses refresh
 }
 
 # Function: screen_buffer_clear_current
@@ -125,18 +157,19 @@ render_diff_and_draw() {
 # Details:
 #   This is typically called at the beginning of a new frame render cycle,
 #   before UI elements draw their content to the current buffer.
-#   Assumes STTY_ROWS and STTY_COLS are available.
+#   Uses global $LINES and $COLS variables.
 screen_buffer_clear_current() {
     local y x
+    local default_cell_value=" :default:default:" # Space, default fg, default bg, no attributes
     
-    if [[ -z "$STTY_ROWS" || -z "$STTY_COLS" ]]; then
-        log_error "screen_buffer_clear_current: STTY_ROWS or STTY_COLS not set. Cannot clear."
+    if [[ -z "$LINES" || -z "$COLS" ]]; then
+        log_error "screen_buffer_clear_current: LINES or COLS not set. Cannot clear."
         return 1
     fi
 
-    for ((y = 0; y < STTY_ROWS; y++)); do
-        for ((x = 0; x < STTY_COLS; x++)); do
-            ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]=" :normal"
+    for ((y = 0; y < LINES; y++)); do
+        for ((x = 0; x < COLS; x++)); do
+            ZIF_SCREEN_CURRENT_BUFFER["$y,$x"]="$default_cell_value"
         done
     done
     # log_debug "Screen current buffer cleared." # Optional: can be too verbose
