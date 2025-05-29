@@ -1,354 +1,125 @@
 #!/usr/bin/env zsh
 
 # Load the zsh/curses module
-# zmodload will return 0 on success, and non-zero on failure.
 if ! zmodload zsh/curses; then
     print "Error: zsh/curses module could not be loaded." >&2
     print "Please ensure your Zsh version supports it and it's correctly installed." >&2
     exit 1
 fi
 
-# Initialize the curses environment
-# This function sets up the terminal for curses-based applications.
-if ! zcurses_initscr; then
-    print "Error: Could not initialize curses environment (zcurses_initscr failed)." >&2
-    exit 1
-fi
+# Initialize curses
+zcurses init
+echoti civis # Hide cursor using terminfo
 
-# Enable colors
-if zcurses_has_colors; then
-    zcurses_start_color
-    zcurses_init_pair 1 COLOR_WHITE COLOR_BLACK # Standard text
-    zcurses_init_pair 2 COLOR_BLUE COLOR_BLACK  # Dialog borders, titles
-    zcurses_init_pair 3 COLOR_BRIGHT_BLACK COLOR_BLACK # Shadow character (dimmed)
-    zcurses_init_pair 4 COLOR_CYAN COLOR_BLACK  # Menu item indicators (submenu arrow)
-    zcurses_init_pair 5 COLOR_YELLOW COLOR_BLACK # Focused elements (scrollbar thumb, input field text)
-    zcurses_init_pair 6 COLOR_WHITE COLOR_BLUE # Focused button
-    zcurses_init_pair 7 COLOR_GREEN COLOR_BLACK # File type indicator - File
-    zcurses_init_pair 8 COLOR_MAGENTA COLOR_BLACK # File type indicator - Directory
+# Enable Colors and Define Pairs
+local ANIMATION_DELAY=10 # ms
+if zcurses start_color; then
+    zcurses init_pair 1 7 0 # Pair 1: White text on Black background (Default)
+    zcurses init_pair 2 0 7 # Pair 2: Black text on White background (Highlight/Reverse)
+    zcurses init_pair 3 4 0 # Pair 3: Blue text on Black background (Borders)
+    zcurses init_pair 4 6 0 # Pair 4: Cyan text on Black background (Submenu indicator)
+    zcurses init_pair 5 3 0 # Pair 5: Yellow text on Black for scrollbar thumb / input field text
+    zcurses init_pair 6 0 4 # Pair 6: Black text on Blue for focused button
+    zcurses init_pair 7 2 0 # Pair 7: Green text on Black (File Picker: File)
+    zcurses init_pair 8 4 0 # Pair 8: Blue text on Black (File Picker: Directory)
+    zcurses init_pair 9 0 0 # Pair 9: Black on Black (Shadow - for char ' ') OR Bright_Black FG
+                           # Using specific shadow char '▒' (U+2592) with a dim color is better
+    zcurses init_pair 10 8 0 # Pair 10: Bright Black (Dark Gray) on Black for shadow char
 else
-    :
+    print "Warning: Could not start colors. Using monochrome."
 fi
-
-
-zcurses_clear; zcurses_curs_set 0; zcurses_noecho; zcurses_keypad 1
 
 # Define Key Code Constants
-local KEY_UP=259; local KEY_DOWN=258; local KEY_ENTER_LF=10; local KEY_ENTER_CR=13
-local KEY_Q_LOWER=113; local KEY_SPACEBAR=32; local KEY_ESC=27
-local KEY_D_LOWER=100; local KEY_C_LOWER=99; local KEY_F_LOWER=102 # For File Picker Test via menu
-local KEY_BACKSPACE=127; local KEY_LEFT_ARROW=260; local KEY_RIGHT_ARROW=261
-local KEY_DC=330; local KEY_TAB=9
-local ANIMATION_DELAY=10 # ms for dialog animation
-
-# Scrollbar Constants (for main menu)
-local scrollbar_col=40; local SCROLLBAR_TRACK_CHAR='│'; local SCROLLBAR_THUMB_CHAR='█'
-local SCROLLBAR_UP_ARROW='▲'; local SCROLLBAR_DOWN_ARROW='▼'; local max_visible_items=5
+local KEY_UP_CODE=259; local KEY_DOWN_CODE=258; local KEY_LEFT_ARROW=260; local KEY_RIGHT_ARROW=261
+local KEY_ENTER_LF=10; local KEY_ENTER_CR=13
+local KEY_Q_LOWER=113; local KEY_ESC=27; local KEY_TAB=9
+local KEY_BACKSPACE=127; local KEY_DC=330 
+local KEY_D_LOWER=100 # Test Input Dialog
+local KEY_C_LOWER=99  # Test Confirm Dialog
+local KEY_F_LOWER=102 # Test File Picker Dialog
 
 # --- Menu Data Structures ---
-local -a main_menu_items=("Network" "Appearance" "TestInputDialog" "TestConfirmDialog" "TestFilePickerDialog" "ExitProgram")
-typeset -A menu_item_Network=(title="Network Settings" submenu="network_submenu_items")
-typeset -A menu_item_Appearance=(title="Appearance Config" submenu="appearance_submenu_items")
-typeset -A menu_item_TestInputDialog=(title="Test Input Dialog" action="test_input_dialog")
-typeset -A menu_item_TestConfirmDialog=(title="Test Confirm Dialog" action="test_confirm_dialog")
-typeset -A menu_item_TestFilePickerDialog=(title="Test File Picker" action="test_file_picker_dialog_action")
-typeset -A menu_item_ExitProgram=(title="Exit Program")
+local -a main_menu_items_ref=("Network" "Appearance" "DialogTests" "ExitProgram")
+typeset -gA menu_item_Network=(title="Network Settings" submenu_ref="network_submenu_items_ref")
+typeset -gA menu_item_Appearance=(title="Appearance" submenu_ref="appearance_submenu_items_ref")
+typeset -gA menu_item_DialogTests=(title="Test Dialogs" submenu_ref="dialog_test_submenu_items_ref")
+typeset -gA menu_item_ExitProgram=(title="Exit Program")
+local -a network_submenu_items_ref=("SetIP" "ConfigureDNS" "Back_Network")
+typeset -gA menu_item_SetIP=(title="Set IP Address"); typeset -gA menu_item_ConfigureDNS=(title="Configure DNS"); typeset -gA menu_item_Back_Network=(title="Back")
+local -a appearance_submenu_items_ref=("Colors" "Fonts" "Back_Appearance")
+typeset -gA menu_item_Colors=(title="Color Settings"); typeset -gA menu_item_Fonts=(title="Font Settings"); typeset -gA menu_item_Back_Appearance=(title="Back")
+local -a dialog_test_submenu_items_ref=("TestInput" "TestConfirm" "TestFilePicker" "Back_Dialogs")
+typeset -gA menu_item_TestInput=(title="Input Dialog" action="test_input_dialog_action")
+typeset -gA menu_item_TestConfirm=(title="Confirm Dialog" action="test_confirm_dialog_action")
+typeset -gA menu_item_TestFilePicker=(title="File Picker Dialog" action="test_file_picker_dialog_action")
+typeset -gA menu_item_Back_Dialogs=(title="Back")
 
-local -a network_submenu_items=("Set_IP_Address" "Configure_DNS" "Back")
-typeset -A menu_item_Set_IP_Address=(title="Set IP Address")
-typeset -A menu_item_Configure_DNS=(title="Configure DNS")
-typeset -A menu_item_Back=(title="Back to Main Menu")
+# --- Global Menu State Management ---
+typeset -ga menu_window_stack; typeset -gA menu_state_stack
+typeset -g active_menu_win_name=""; typeset -g active_menu_items_arr_name=""
+typeset -g active_menu_current_idx=0; typeset -g active_menu_scroll_offset=0
+typeset -g integer menu_win_counter=0
 
-local -a appearance_submenu_items=("Change_Theme" "Font_Size" "Back")
-typeset -A menu_item_Change_Theme=(title="Change Theme")
-typeset -A menu_item_Font_Size=(title="Font Size")
+local MENU_SCROLLBAR_TRACK_CHAR='│'; local MENU_SCROLLBAR_THUMB_CHAR='█'
+local MENU_SCROLLBAR_UP_ARROW='▲'; local MENU_SCROLLBAR_DOWN_ARROW='▼'
 
-# --- Menu Stack and State ---
-local -a menu_stack
-typeset -A state_main_menu_items=(current_selection_idx=0 scroll_offset=0)
-typeset -A state_network_submenu_items=(current_selection_idx=0 scroll_offset=0)
-typeset -A state_appearance_submenu_items=(current_selection_idx=0 scroll_offset=0)
-
-# --- Global Variables ---
-local current_menu_array_name="main_menu_items"; local current_selection_idx=0; local scroll_offset=0
-typeset -A multi_selected_states; local -a dialog_screen_backup_buffer
+# Global dialog result variables
 local global_input_string=""; local global_file_picker_result=""
 
+# --- Dialog System ---
+_draw_dialog_decorations_animated() {
+    local DLG_WIN_NAME="$1"; local DLG_TITLE="$2"; local DLG_WIDTH=$3; local DLG_HEIGHT=$4
+    local border_pair="$(zcurses color_pair 3)"; local title_pair="$(zcurses color_pair 3)" A_BOLD
+    local r_start=0; local c_start=0; local r_end=$((DLG_HEIGHT-1)); local c_end=$((DLG_WIDTH-1))
 
-# --- Dialog Drawing Functions ---
-_draw_shadow() { local r=$1; local c=$2; local h=$3; local w=$4; local char='▒'; zcurses_attr_on "$(zcurses_color_pair 3)"; for i ({$((c+1))..$((c+w))}) zcurses_mvaddstr $((r+h)) $i "$char"; for i ({$((r+1))..$((r+h-1))}) zcurses_mvaddstr $i $((c+w)) "$char"; zcurses_attr_off "$(zcurses_color_pair 3)"; }
-
-# _draw_box(start_row, start_col, height, width, title) - Animated
-_draw_box() {
-    local r_start=$1; local c_start=$2; local height=$3; local width=$4; local title=$5
-    local r_end=$((r_start + height - 1)); local c_end=$((c_start + width - 1))
-
-    # Apply border color
-    zcurses_attr_on "$(zcurses_color_pair 2)"
-
-    # Top-left corner
-    zcurses_mvaddstr $r_start $c_start "┌"; zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY
-
-    # Top border and title (animated part by part)
-    local title_len=${#title}
-    local title_display_start_col=$((c_start + (width - title_len) / 2))
-    if (( title_display_start_col <= c_start )); then title_display_start_col=$((c_start + 1)); fi
-    local title_actual_len=$title_len
-    if (( title_display_start_col + title_len >= c_end )); then title_actual_len=$((c_end - title_display_start_col -1)); fi
+    zcurses clear "$DLG_WIN_NAME"
+    zcurses attr_on "$DLG_WIN_NAME" "$border_pair"
+    zcurses move "$DLG_WIN_NAME" $r_start $c_start; zcurses string "$DLG_WIN_NAME" "┌"; zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    local title_len=${#DLG_TITLE}; local title_display_start_col=$(( (DLG_WIDTH - title_len - 2) / 2 +1)) # -2 for spaces around title
+    if (( title_display_start_col <= c_start+1 )) title_display_start_col=$((c_start+2)); fi
     
-    # Draw first part of top border
-    for c in {$((c_start + 1))..$((title_display_start_col -1))}; do
-        zcurses_mvaddstr $r_start $c "─"; 
-    done
-    if (( title_display_start_col > c_start + 1 )); then zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY; fi
-
-    # Draw title (if any)
-    if [[ -n "$title" && title_actual_len > 0 ]]; then
-        zcurses_attr_on A_BOLD
-        zcurses_mvaddstr $r_start $title_display_start_col "${title[1,$title_actual_len]}"
-        zcurses_attr_off A_BOLD
-        zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY
-    fi
-
-    # Draw rest of top border
-    local top_border_title_end_col=$((title_display_start_col + title_actual_len))
-    if ! [[ -n "$title" && title_actual_len > 0 ]]; then # Adjust if no title was drawn
-        top_border_title_end_col=$((c_start + 1))
-    fi
-    for c in {$top_border_title_end_col..$((c_end - 1))}; do
-        zcurses_mvaddstr $r_start $c "─";
-    done
-    if (( c_end -1 >= top_border_title_end_col )); then zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY; fi
-
-    # Top-right corner
-    zcurses_mvaddstr $r_start $c_end "┐"; zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY
+    for c ({$((c_start+1))..$((title_display_start_col-1))}) { zcurses move "$DLG_WIN_NAME" $r_start $c; zcurses string "$DLG_WIN_NAME" "─"; }
+    if ((title_display_start_col > c_start+1)) { zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY; }
     
-    # Side borders (iteratively) and clear inner line
-    zcurses_attr_off "$(zcurses_color_pair 2)" # Turn off border color for clearing
-    zcurses_attr_on "$(zcurses_color_pair 1)"  # Set default color for inner area
-    for r in {$((r_start + 1))..$((r_end - 1))}; do
-        zcurses_attr_on "$(zcurses_color_pair 2)" # Border color for vertical lines
-        zcurses_mvaddstr $r $c_start "│"; zcurses_mvaddstr $r $c_end "│"
-        zcurses_attr_off "$(zcurses_color_pair 2)"
-        
-        # Clear inner line segment
-        if (( width - 2 > 0 )); then zcurses_mvaddstr $r $((c_start + 1)) "$(printf '%*s' $((width - 2)) '')"; fi
-        zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY
-    done
-    zcurses_attr_off "$(zcurses_color_pair 1)" # Turn off default color
-
-    # Bottom border
-    zcurses_attr_on "$(zcurses_color_pair 2)" # Border color
-    zcurses_mvaddstr $r_end $c_start "└"; zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY # Bottom-left
-    for c in {$((c_start + 1))..$((c_end - 1))}; do # Bottom line
-        zcurses_mvaddstr $r_end $c "─";
-    done
-    if ((width > 2)); then zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY; fi
-    zcurses_mvaddstr $r_end $c_end "┘"; zcurses_refresh; zcurses_delay_output $ANIMATION_DELAY # Bottom-right
-    zcurses_attr_off "$(zcurses_color_pair 2)"
+    if [[ -n "$DLG_TITLE" ]]; then
+        zcurses attr_on "$DLG_WIN_NAME" "$title_pair"
+        zcurses move "$DLG_WIN_NAME" $r_start $title_display_start_col; zcurses string "$DLG_WIN_NAME" " $DLG_TITLE "
+        zcurses attr_off "$DLG_WIN_NAME" "$title_pair"; zcurses attr_on "$DLG_WIN_NAME" "$border_pair" # Re-set border pair
+        zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    fi
+    local top_border_title_end_c=$((title_display_start_col + title_len + 1))
+    if ! [[ -n "$DLG_TITLE" ]]; then top_border_title_end_c=$((c_start + 1)); fi
+    for c ({$top_border_title_end_c..$((c_end-1))}) { zcurses move "$DLG_WIN_NAME" $r_start $c; zcurses string "$DLG_WIN_NAME" "─"; }
+    if ((c_end-1 >= top_border_title_end_c)) { zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY; }
+    zcurses move "$DLG_WIN_NAME" $r_start $c_end; zcurses string "$DLG_WIN_NAME" "┐"; zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    
+    for r ({$((r_start+1))..$((r_end-1))}) {
+        zcurses move "$DLG_WIN_NAME" $r $c_start; zcurses string "$DLG_WIN_NAME" "│"
+        zcurses move "$DLG_WIN_NAME" $r $c_end; zcurses string "$DLG_WIN_NAME" "│"
+        zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    }
+    zcurses move "$DLG_WIN_NAME" $r_end $c_start; zcurses string "$DLG_WIN_NAME" "└"; zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    for c ({$((c_start+1))..$((c_end-1))}) { zcurses move "$DLG_WIN_NAME" $r_end $c; zcurses string "$DLG_WIN_NAME" "─"; }
+    if ((DLG_WIDTH > 2)) { zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY; }
+    zcurses move "$DLG_WIN_NAME" $r_end $c_end; zcurses string "$DLG_WIN_NAME" "┘"; zcurses refresh "$DLG_WIN_NAME"; zcurses delay_output $ANIMATION_DELAY
+    zcurses attr_off "$DLG_WIN_NAME" "$border_pair"
 }
 
-_draw_buttons() { local crs=$1; local ccs=$2; local cw=$3; local -n br="$4"; local fi=$5; local dih=$6; if (( ${#br[@]} == 0 )) return; local tbw=0; local -a dls=(); for l in "${br[@]}"; do if (( ${#dls[@]} == fi )); then dls+=("[ $l ]"); else dls+=("< $l >"); fi; tbw=$((tbw+${#dls[-1]}+2)); done; tbw=$((tbw-2)); local ccp=$((ccs+(cw-tbw)/2)); local brs=$((crs+dih-1)); for i ({1..${#dls[@]}}) { local dl="${dls[$i]}"; if ((i-1==fi)) { zcurses_attr_on "$(zcurses_color_pair 6)" A_BOLD; zcurses_mvaddstr $brs $ccp "$dl"; zcurses_attr_off "$(zcurses_color_pair 6)" A_BOLD; } else { zcurses_attr_on "$(zcurses_color_pair 1)"; zcurses_mvaddstr $brs $ccp "$dl"; zcurses_attr_off "$(zcurses_color_pair 1)"; } ccp=$((ccp+${#dl}+2)); }; }
-_draw_message_content() { local cr=$1; local cc=$2; local cw=$3; local m="$4"; local dih=$5; local mr=$((cr+(dih-1-1)/2)); if ((dih<=2)) mr=$cr; local mmw=$((cw-2)); if ((${#m}>mmw && mmw>0)) m="${m[1,mmw]}"; zcurses_attr_on "$(zcurses_color_pair 1)"; zcurses_mvaddstr $mr $((cc+1)) "$m"; zcurses_attr_off "$(zcurses_color_pair 1)"; }
+_draw_dialog_buttons_generic() { local DLG_WIN_NAME="$1"; local buttons_y=$2; local dialog_width=$3; local -n buttons_ref_local="$4"; local focused_idx=$5; local current_focus_on_buttons=${6:-true}; if (( ${#buttons_ref_local[@]} == 0 )) return; local total_btn_width=0; local -a display_labels=(); for label in "${buttons_ref_local[@]}"; do if [[ "$current_focus_on_buttons" == "true" && ${#display_labels[@]} == $focused_idx ]]; then display_labels+=("[ $label ]"); else display_labels+=("< $label >"); fi; total_btn_width=$((total_btn_width + ${#display_labels[-1]} + 2)); done; total_btn_width=$((total_btn_width - 2)); local current_btn_x=$(( (dialog_width - total_btn_width) / 2 )); if ((current_btn_x < 1)) current_btn_x=1; for i in {1..${#display_labels[@]}}; do local label_text="${display_labels[$i]}"; zcurses move "$DLG_WIN_NAME" $buttons_y $current_btn_x; if (( i - 1 == focused_idx && "$current_focus_on_buttons" == "true" )); then zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 6)" A_BOLD; zcurses string "$DLG_WIN_NAME" "$label_text"; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 6)" A_BOLD; else zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; zcurses string "$DLG_WIN_NAME" "$label_text"; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; fi; current_btn_x=$((current_btn_x + ${#label_text} + 2)); done; }
+_input_dialog_interaction_callback() { local DLG_WIN_NAME="$1"; local -n DLG_STATUS_CODE_REF="$2"; local -n data_ref="$3"; local current_input_value="${data_ref[initial_value]}"; local cursor_pos=${#current_input_value}; local current_focus="input"; local focused_button_idx=0; local -a buttons_ref_values; if [[ -n "${data_ref[button_labels_array_name]}" ]] && typeset -p "${data_ref[button_labels_array_name]}" | grep -q 'declare -a'; then eval "buttons_ref_values=(\"\${(@P)${data_ref[button_labels_array_name]}}\")"; else buttons_ref_values=("OK" "Cancel"); fi; local prompt_text="${data_ref[prompt_text]}"; local field_width=${data_ref[field_width]}; local dialog_h=${data_ref[dialog_height]}; local dialog_w=${data_ref[dialog_width]}; local input_field_y=1; if [[ -n "${data_ref[title]}" ]] input_field_y=2; fi; local input_field_x=1; local buttons_y=$((dialog_h - 2)); _draw_input_field_content_local() { zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; zcurses move "$DLG_WIN_NAME" $input_field_y $input_field_x; zcurses string "$DLG_WIN_NAME" "$prompt_text "; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; local field_start_x=$((input_field_x + ${#prompt_text} + 1)); zcurses move "$DLG_WIN_NAME" $input_field_y $field_start_x; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; zcurses string "$DLG_WIN_NAME" "${(pl.$field_width.. .)}"; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; zcurses move "$DLG_WIN_NAME" $input_field_y $field_start_x; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 5)"; zcurses string "$DLG_WIN_NAME" "$current_input_value"; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 5)"; if [[ "$current_focus" == "input" ]] zcurses_move "$DLG_WIN_NAME" $input_field_y $((field_start_x + cursor_pos)); fi; }; typeset dlg_char dlg_keycode; while true; do _draw_input_field_content_local; _draw_dialog_buttons_generic "$DLG_WIN_NAME" $buttons_y $dialog_w "buttons_ref_values" $focused_button_idx "$([[ "$current_focus" == "buttons" ]])"; if [[ "$current_focus" == "input" ]]; then zcurses curs_set "$DLG_WIN_NAME" 1; else zcurses curs_set "$DLG_WIN_NAME" 0; fi; zcurses refresh "$DLG_WIN_NAME"; if ! zcurses input "$DLG_WIN_NAME" dlg_char dlg_keycode 0; then DLG_STATUS_CODE_REF=1; break; fi; case "$dlg_keycode" in $KEY_TAB) if [[ "$current_focus" == "input" ]] && ((${#buttons_ref_values[@]}>0)); then current_focus="buttons"; focused_button_idx=0; elif [[ "$current_focus" == "buttons" ]]; then current_focus="input"; fi;; $KEY_ESC) DLG_STATUS_CODE_REF=1; break;; *) if [[ "$current_focus" == "input" ]]; then case "$dlg_keycode" in $KEY_ENTER_LF|$KEY_ENTER_CR) if ((${#buttons_ref_values[@]}>0)); then current_focus="buttons"; focused_button_idx=0; else data_ref[result_input_string]="$current_input_value"; DLG_STATUS_CODE_REF=0; break; fi;; $KEY_BACKSPACE) if ((cursor_pos>0)) current_input_value="${current_input_value[1,$((cursor_pos-1))]}${current_input_value[$((cursor_pos+1)),-1]}"; ((cursor_pos--)); fi;; $KEY_DC) if ((cursor_pos<${#current_input_value})) current_input_value="${current_input_value[1,$cursor_pos]}${current_input_value[$((cursor_pos+2)),-1]}"; fi;; $KEY_LEFT_ARROW) if ((cursor_pos>0)) ((cursor_pos--)); fi;; $KEY_RIGHT_ARROW) if ((cursor_pos<${#current_input_value})) ((cursor_pos++)); fi;; *) if [[ -n "$dlg_char" && ${#current_input_value}<field_width ]] current_input_value="${current_input_value[1,$cursor_pos]}$dlg_char${current_input_value[$((cursor_pos+1)),-1]}"; ((cursor_pos++)); fi;; esac; elif [[ "$current_focus" == "buttons" ]]; then case "$dlg_keycode" in $KEY_LEFT_ARROW) ((focused_button_idx--)); if ((focused_button_idx<0)) focused_button_idx=$((${#buttons_ref_values[@]}-1)); fi;; $KEY_RIGHT_ARROW) ((focused_button_idx++)); if ((focused_button_idx>=${#buttons_ref_values[@]})) focused_button_idx=0; fi;; $KEY_ENTER_LF|$KEY_ENTER_CR) local sel_btn="${buttons_ref_values[$((focused_button_idx+1))]}"; if [[ "$sel_btn"=="OK" ]] { data_ref[result_input_string]="$current_input_value"; DLG_STATUS_CODE_REF=0; } else { DLG_STATUS_CODE_REF=1; } break;; esac; fi;; esac; done; zcurses curs_set "$DLG_WIN_NAME" 0; }
+_confirmation_dialog_interaction_callback() { local DLG_WIN_NAME="$1"; local -n DLG_STATUS_CODE_REF="$2"; local -n data_ref="$3"; local focused_button_idx=0; local -a buttons_ref_values; if [[ -n "${data_ref[button_labels_array_name]}" ]] && typeset -p "${data_ref[button_labels_array_name]}" | grep -q 'declare -a'; then eval "buttons_ref_values=(\"\${(@P)${data_ref[button_labels_array_name]}}\")"; else buttons_ref_values=("OK"); fi; local message_text="${data_ref[message]}"; local dialog_h=${data_ref[dialog_height]}; local dialog_w=${data_ref[dialog_width]}; local message_y=1; if [[ -n "${data_ref[title]}" ]] message_y=2; fi; local message_x=1; local buttons_y=$((dialog_h - 2)); _draw_conf_content_local() { zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; local line; integer current_line_y=$message_y; local max_msg_width=$((dialog_w - 2*message_x -2)); for line in ${(f)message_text}; do local display_line="${line}"; if ((${#display_line}>max_msg_width && max_msg_width > 0)) display_line="${display_line[1,$max_msg_width]}"; zcurses move "$DLG_WIN_NAME" $current_line_y $message_x; zcurses string "$DLG_WIN_NAME" " $display_line "; ((current_line_y++)); if ((current_line_y >= buttons_y -1)) break; done; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; }; typeset dlg_char dlg_keycode; zcurses curs_set "$DLG_WIN_NAME" 0; while true; do _draw_conf_content_local; _draw_dialog_buttons_generic "$DLG_WIN_NAME" $buttons_y $dialog_w "buttons_ref_values" $focused_button_idx true; zcurses refresh "$DLG_WIN_NAME"; if ! zcurses input "$DLG_WIN_NAME" dlg_char dlg_keycode 0; then DLG_STATUS_CODE_REF=1; break; fi; case "$dlg_keycode" in $KEY_LEFT_ARROW) ((focused_button_idx--)); if ((focused_button_idx<0)) focused_button_idx=$((${#buttons_ref_values[@]}-1)); fi;; $KEY_RIGHT_ARROW) ((focused_button_idx++)); if ((focused_button_idx>=${#buttons_ref_values[@]})) focused_button_idx=0; fi;; $KEY_ENTER_LF|$KEY_ENTER_CR) DLG_STATUS_CODE_REF=$focused_button_idx; break;; $KEY_ESC) local cancel_idx=-1; for i ({1..${#buttons_ref_values[@]}}) if [[ "${buttons_ref_values[$i]}"=="Cancel"||"${buttons_ref_values[$i]}"=="No" ]] { cancel_idx=$((i-1)); break; } fi; if ((cancel_idx!=-1)) DLG_STATUS_CODE_REF=$cancel_idx; else DLG_STATUS_CODE_REF=$((${#buttons_ref_values[@]}-1)); fi; if ((${#buttons_ref_values[@]}==0)) DLG_STATUS_CODE_REF=1; fi; break;; $KEY_TAB) if ((${#buttons_ref_values[@]}>1)) ((focused_button_idx= (focused_button_idx+1)%${#buttons_ref_values[@]})); fi;; esac; done; }
+_fp_list_files() { local ptl="$1"; local -n lir="$2"; lir=(); local rp; rp=$(realpath -m "$ptl"); if [[ "$rp"!="/" && "$rp"==*/ && ${#rp} -gt 1 ]] rp="${rp%/}"; if [[ "$rp"!="/" ]] lir+=(".."); local i; for i ("$rp"/*(N/)) lir+=("$(basename "$i")/"); for i ("$rp"/*(N.)) lir+=("$(basename "$i")"); }
+_file_picker_interaction_callback() { local DLG_WIN_NAME="$1"; local -n DLG_STATUS_CODE_REF="$2"; local -n data_ref="$3"; local -n buttons_ref="${data_ref[button_labels_array_name]}"; local current_path="${data_ref[initial_path]:-${PWD}}"; local -a fp_list_display; local fp_selection_idx=0; local fp_scroll_offset=0; local num_fp_items=0; local current_focus="list"; local focused_button_idx=0; local path_display_y=1; local list_display_y=$((path_display_y + 1)); local buttons_draw_y=$((data_ref[dialog_height] - 2)); local list_height=$((buttons_draw_y - list_display_y)); local max_visible_fp_items=$list_height; local scrollbar_fp_col=$((data_ref[dialog_width] - 2)); typeset dlg_char dlg_keycode; zcurses curs_set "$DLG_WIN_NAME" 0; while true; do _fp_list_files "$current_path" fp_list_display; num_fp_items=${#fp_list_display[@]}; if (( fp_selection_idx >= num_fp_items && num_fp_items > 0 )) fp_selection_idx=$((num_fp_items - 1)); if (( fp_selection_idx < 0 && num_fp_items > 0 )) fp_selection_idx=0; zcurses clear "$DLG_WIN_NAME"; _draw_dialog_decorations_animated "$DLG_WIN_NAME" "${data_ref[title]}" "${data_ref[dialog_width]}" "${data_ref[dialog_height]}"; local path_display_line="${(Mr.$((data_ref[dialog_width]-4))...%)[Path: $current_path]}"; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; zcurses move "$DLG_WIN_NAME" $path_display_y 1; zcurses string "$DLG_WIN_NAME" " $path_display_line "; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; for i ({0..$((max_visible_fp_items - 1))}) { local actual_idx=$((fp_scroll_offset + i)); local screen_row=$((list_display_y + i)); zcurses move "$DLG_WIN_NAME" $screen_row 1; if (( actual_idx < num_fp_items )); then local item_d="${fp_list_display[$((actual_idx+1))]}"; local list_item_color_pair=$([[ "$item_d" == */ || "$item_d" == ".." ]] && echo 8 || echo 7); local display_str=" $item_d"; local max_item_len=$((scrollbar_fp_col - 2)); if ((${#display_str}>max_item_len && max_item_len > 0)) display_str=" ${display_str[2,$max_item_len]}"; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair $list_item_color_pair)"; if (( actual_idx == fp_selection_idx && "$current_focus" == "list" )) zcurses attr_on "$DLG_WIN_NAME" A_REVERSE; zcurses string "$DLG_WIN_NAME" "$display_str"; zcurses attr_off "$DLG_WIN_NAME" A_REVERSE "$(zcurses color_pair $list_item_color_pair)"; local clear_len=$(( data_ref[dialog_width] - 2 - ${#display_str} -1 )); if ((clear_len > 0)) zcurses string "$DLG_WIN_NAME" "${(pl.$clear_len.. .)}"; else zcurses string "$DLG_WIN_NAME" "${(pl.$((data_ref[dialog_width]-3)).. .)}"; fi; } else zcurses string "$DLG_WIN_NAME" "${(pl.$((data_ref[dialog_width]-3)).. .)}"; fi; }; if (( num_fp_items > max_visible_fp_items )) { local track_h=$max_visible_fp_items; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; for r ({0..$((track_h - 1))}) { zcurses move "$DLG_WIN_NAME" $((list_display_y + r)) $scrollbar_fp_col; zcurses string "$DLG_WIN_NAME" "$MENU_SCROLLBAR_TRACK_CHAR"; }; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 1)"; local thumb_h=$(( (max_visible_fp_items * track_h) / num_fp_items )); if ((thumb_h==0)) thumb_h=1; if ((thumb_h > track_h)) thumb_h=$track_h; local thumb_y_rel=0; if ((num_fp_items > max_visible_fp_items)) thumb_y_rel=$(( (fp_scroll_offset * track_h) / num_fp_items )); if ((thumb_y_rel + thumb_h > track_h)) thumb_y_rel=$((track_h - thumb_h)); if ((thumb_y_rel < 0)) thumb_y_rel=0; zcurses attr_on "$DLG_WIN_NAME" "$(zcurses color_pair 5)"; for t ({0..$((thumb_h - 1))}) { zcurses move "$DLG_WIN_NAME" $((list_display_y + thumb_y_rel + t)) $scrollbar_fp_col; zcurses string "$DLG_WIN_NAME" "$MENU_SCROLLBAR_THUMB_CHAR"; }; zcurses attr_off "$DLG_WIN_NAME" "$(zcurses color_pair 5)"; fi; }; _draw_dialog_buttons_generic "$DLG_WIN_NAME" $buttons_draw_y "${data_ref[dialog_width]}" buttons_ref $focused_button_idx "$([[ "$current_focus" == "buttons" ]])"; if [[ "$current_focus" == "list" ]]; then zcurses curs_set "$DLG_WIN_NAME" 0; elif [[ "$current_focus" == "input" ]]; then zcurses curs_set "$DLG_WIN_NAME" 1; else zcurses curs_set "$DLG_WIN_NAME" 0; fi; zcurses refresh "$DLG_WIN_NAME"; if ! zcurses input "$DLG_WIN_NAME" dlg_char dlg_keycode 0; then DLG_STATUS_CODE_REF=1; break; fi; case "$dlg_keycode" in $KEY_TAB) if [[ "$current_focus" == "list" ]] && ((${#buttons_ref[@]}>0)); then current_focus="buttons"; focused_button_idx=0; elif [[ "$current_focus" == "buttons" ]]; then current_focus="list"; fi;; $KEY_ESC) if [[ "$current_focus" == "list" ]]; then if [[ "$current_path" != "/" && "$current_path" != "." && "$current_path" != "" ]] current_path="$(realpath -m "$current_path/..")"; else DLG_STATUS_CODE_REF=1; break; fi; else DLG_STATUS_CODE_REF=1; break; fi; fp_selection_idx=0; fp_scroll_offset=0; continue;; *) if [[ "$current_focus" == "list" ]]; then case "$dlg_keycode" in $KEY_UP_CODE) ((fp_selection_idx--)); if ((fp_selection_idx<0)) fp_selection_idx=$((num_fp_items-1)); fi; if ((fp_selection_idx < fp_scroll_offset)) fp_scroll_offset=$fp_selection_idx; fi; if ((fp_scroll_offset < 0)) fp_scroll_offset=0; fi;; $KEY_DOWN_CODE) ((fp_selection_idx++)); if ((fp_selection_idx >= num_fp_items && num_fp_items > 0)) fp_selection_idx=0; elif ((num_fp_items == 0)) fp_selection_idx=0; fi; if ((fp_selection_idx >= fp_scroll_offset + max_visible_fp_items)) fp_scroll_offset=$((fp_selection_idx - max_visible_fp_items + 1)); fi; local max_fp_scroll=$((num_fp_items - max_visible_fp_items)); if ((max_fp_scroll < 0)) max_fp_scroll=0; fi; if ((fp_scroll_offset > max_fp_scroll)) fp_scroll_offset=$max_fp_scroll; fi;; $KEY_ENTER_LF|$KEY_ENTER_CR) if (( num_fp_items == 0 )) continue; local sel_item_disp="${fp_list_display[$((fp_selection_idx+1))]}"; local sel_basename="${sel_item_disp%/}"; local new_path; if [[ "$sel_item_disp" == "../" ]] new_path=$(realpath -m "$current_path/.."); elif [[ "$sel_item_disp" == */ ]] { if [[ "$current_path"=="/" ]] new_path="/$sel_basename"; else new_path="$current_path/$sel_basename"; fi; } else { if [[ "$current_path"=="/" ]] data_ref[result_file_path]="/$sel_basename"; else data_ref[result_file_path]="$current_path/$sel_basename"; fi; current_focus="buttons"; focused_button_idx=0; for i ({1..${#buttons_ref[@]}}) { if [[ "${buttons_ref[$i]}" == "Select" ]] { focused_button_idx=$((i-1)); break; } }; continue; } if [[ -d "$new_path" ]] current_path="$new_path"; else continue; fi; fp_selection_idx=0; fp_scroll_offset=0;; esac; elif [[ "$current_focus" == "buttons" ]]; then case "$dlg_keycode" in $KEY_LEFT_ARROW) ((focused_button_idx--)); if ((focused_button_idx<0)) focused_button_idx=$((${#buttons_ref[@]}-1)); fi;; $KEY_RIGHT_ARROW) ((focused_button_idx++)); if ((focused_button_idx>=${#buttons_ref[@]})) focused_button_idx=0; fi;; $KEY_ENTER_LF|$KEY_ENTER_CR) local sel_btn="${buttons_ref[$((focused_button_idx+1))]}"; if [[ "$sel_btn"=="Select" ]] { if [[ -n "${data_ref[result_file_path]}" ]] DLG_STATUS_CODE_REF=0; else DLG_STATUS_CODE_REF=1; fi; } elif [[ "$sel_btn"=="Cancel" ]] DLG_STATUS_CODE_REF=1; fi; break;; esac; fi;; esac; done; zcurses curs_set "$DLG_WIN_NAME" 0; }
+show_dialog_new() { local DLG_WIN_NAME="$1"; local DLG_HEIGHT=$2; local DLG_WIDTH=$3; local DLG_TITLE="$4"; local DLG_CALLBACK_NAME="$5"; local DLG_DATA_ASSOC_NAME="$6"; local -n DLG_RETURN_STATUS_REF="$7"; integer term_h term_w; zcurses getmaxyx stdscr term_h term_w; local start_y=$(((term_h-DLG_HEIGHT)/2)); local start_x=$(((term_w-DLG_WIDTH)/2)); local shadow_win_name="${DLG_WIN_NAME}_shdw"; zcurses addwin "$shadow_win_name" "$DLG_HEIGHT" "$DLG_WIDTH" $((start_y+1)) $((start_x+1)); zcurses attr_on "$shadow_win_name" "$(zcurses color_pair 10)"; zcurses string "$shadow_win_name" "${(pl.$((DLG_HEIGHT*DLG_WIDTH))..▒%)}"; zcurses refresh "$shadow_win_name"; zcurses attr_off "$shadow_win_name" "$(zcurses color_pair 10)"; if ! zcurses addwin "$DLG_WIN_NAME" "$DLG_HEIGHT" "$DLG_WIDTH" "$start_y" "$start_x"; then zcurses move stdscr $((term_h-1)) 0; zcurses string stdscr "Error: Could not create dialog '$DLG_WIN_NAME'."; zcurses refresh stdscr; zcurses_delay_output 2000; DLG_RETURN_STATUS_REF=1; zcurses delwin "$shadow_win_name"; return 1; fi; zcurses scroll "$DLG_WIN_NAME" off; local -n data_ref_for_geom="$DLG_DATA_ASSOC_NAME"; data_ref_for_geom[dialog_height]=$DLG_HEIGHT; data_ref_for_geom[dialog_width]=$DLG_WIDTH; _draw_dialog_decorations_animated "$DLG_WIN_NAME" "$DLG_TITLE" "$DLG_WIDTH" "$DLG_HEIGHT"; DLG_RETURN_STATUS_REF=1; if typeset -f "$DLG_CALLBACK_NAME" >/dev/null; then "$DLG_CALLBACK_NAME" "$DLG_WIN_NAME" DLG_RETURN_STATUS_REF "$DLG_DATA_ASSOC_NAME"; else zcurses move "$DLG_WIN_NAME" 1 1; zcurses string "$DLG_WIN_NAME" "Err: CB $DLG_CALLBACK_NAME missing."; zcurses refresh "$DLG_WIN_NAME"; zcurses_delay_output 2000; fi; zcurses delwin "$DLG_WIN_NAME"; zcurses delwin "$shadow_win_name"; return $DLG_RETURN_STATUS_REF; }
+show_input_dialog_new() { local title="$1"; local prompt="$2"; local initial_val="${3:-}"; local field_width=${4:-20}; typeset -A input_dlg_data; input_dlg_data[title]="$title"; input_dlg_data[prompt_text]="$prompt"; input_dlg_data[initial_value]="$initial_val"; input_dlg_data[field_width]=$field_width; local -a buttons=("OK" "Cancel"); input_dlg_data[button_labels_array_name]="buttons"; input_dlg_data[result_input_string]=""; input_dlg_data[dialog_height]=7; input_dlg_data[dialog_width]=$(( ${#prompt} + field_width + 8 )); if ((input_dlg_data[dialog_width]<40)) input_dlg_data[dialog_width]=40; fi; integer term_w; zcurses getmaxyx stdscr term_h term_w; if ((input_dlg_data[dialog_width]>=term_w-2)) input_dlg_data[dialog_width]=$((term_w-2)); fi; local dlg_status; show_dialog_new "modal_input_dialog" ${input_dlg_data[dialog_height]} ${input_dlg_data[dialog_width]} "$title" "_input_dialog_interaction_callback" "input_dlg_data" dlg_status; if ((dlg_status==0)) global_input_string="${input_dlg_data[result_input_string]}"; else global_input_string=""; fi; return $dlg_status; }
+show_confirmation_dialog_new() { local title="$1"; local message="$2"; local button_labels_arr_name="$3"; typeset -A confirm_dlg_data; confirm_dlg_data[title]="$title"; confirm_dlg_data[message]="$message"; confirm_dlg_data[button_labels_array_name]="$button_labels_arr_name"; local -a temp_buttons; eval "temp_buttons=(\"\${(@P)$button_labels_arr_name}\")"; local num_buttons=${#temp_buttons[@]}; local max_button_text_len=0; local button_total_visual_len=0; if ((num_buttons>0)) { for btn_label in "${temp_buttons[@]}"; do if ((${#btn_label}>max_button_text_len)) max_button_text_len=${#btn_label}; done; button_total_visual_len=$((num_buttons*(max_button_text_len+4)+(num_buttons-1)*2)); } local message_len=${#message}; confirm_dlg_data[dialog_width]=$((message_len>button_total_visual_len?message_len+4:button_total_visual_len+4)); if ((confirm_dlg_data[dialog_width]<30)) confirm_dlg_data[dialog_width]=30; fi; integer term_w; zcurses getmaxyx stdscr term_h term_w; if ((confirm_dlg_data[dialog_width]>=term_w-2)) confirm_dlg_data[dialog_width]=$((term_w-2)); fi; confirm_dlg_data[dialog_height]=6; local dlg_status; show_dialog_new "modal_confirm_dialog" ${confirm_dlg_data[dialog_height]} ${confirm_dlg_data[dialog_width]} "$title" "_confirmation_dialog_interaction_callback" "confirm_dlg_data" dlg_status; return $dlg_status; }
+show_file_picker_dialog_new() { local t="$1"; local ip="${2:-${PWD}}"; typeset -A fpd_info; fpd_info[title]="$t"; fpd_info[initial_path]="$ip"; fpd_info[dialog_type]="file_picker"; local -a fp_btns=("Select" "Cancel"); fpd_info[button_labels_array_name]="fp_btns"; fpd_info[result_file_path]=""; fpd_info[dialog_height]=20; fpd_info[dialog_width]=70; integer tc ZCOLS; zcurses getmaxyx tr tc; if ((fpd_info[dialog_width]>=tc-2)) fpd_info[dialog_width]=$((tc-2)); fi; if ((fpd_info[dialog_height]>=tr-2)) fpd_info[dialog_height]=$((tr-2)); fi; local dlg_status; show_dialog_new "modal_file_picker" ${fpd_info[dialog_height]} ${fpd_info[dialog_width]} "$t" "_file_picker_interaction_callback" "fpd_info" dlg_status; if ((dlg_status==0)) global_file_picker_result="${fpd_info[result_file_path]}"; else global_file_picker_result=""; fi; return $dlg_status; }
 
-# --- File Picker Specific Functions ---
-_file_picker_list_files() { local ptl="$1"; local -n lir="$2"; lir=(); local rp; rp=$(realpath -m "$ptl"); if [[ "$rp"!="/" && "$rp"==*/ ]] rp="${rp%/}"; if [[ "$rp"!="/" ]] lir+=(".."); local i; for i ("$rp"/*(N/)) lir+=("$(basename "$i")/"); for i ("$rp"/*(N.)) lir+=("$(basename "$i")"); }
+push_menu() { local m="$1"; if [[ -z "$m" ]] return 1; if [[ -n "$active_menu_win_name" ]] { menu_state_stack[$active_menu_win_name]="$active_menu_items_arr_name $active_menu_current_idx $active_menu_scroll_offset"; menu_window_stack+=("$active_menu_win_name"); } ((menu_win_counter++)); active_menu_win_name="menu_win_${menu_win_counter}"; active_menu_items_arr_name="$m"; active_menu_current_idx=0; active_menu_scroll_offset=0; local nmh=10; local nmw=40; integer trm_h trm_w; zcurses getmaxyx stdscr trm_h trm_w; local nmy=$(((trm_h-nmh)/2)); local nmx=$(((trm_w-nmw)/2)); if ((nmy<0)) nmy=0; if ((nmx<0)) nmx=0; zcurses addwin "$active_menu_win_name" "$nmh" "$nmw" "$nmy" "$nmx"; zcurses scroll "$active_menu_win_name" off; return 0; }
+pop_menu() { if (( ${#menu_window_stack[@]} == 0 )) return 1; zcurses delwin "$active_menu_win_name"; active_menu_win_name="${menu_window_stack[-1]}"; unset 'menu_window_stack[-1]'; local -a ps; ps=(${(z)menu_state_stack[$active_menu_win_name]}); active_menu_items_arr_name="${ps[1]}"; active_menu_current_idx=${ps[2]:-0}; active_menu_scroll_offset=${ps[3]:-0}; unset menu_state_stack[$active_menu_win_name]; return 0; }
+_display_menu_in_window() { local wn="$1"; local ian="$2"; local ci=$3; local so=$4; zcurses clear "$wn"; integer wh ww; zcurses getmaxyx "$wn" wh ww; local bcp="$(zcurses color_pair 3)"; zcurses attr_on "$wn" "$bcp"; zcurses border "$wn"; zcurses attr_off "$wn" "$bcp"; local dah=$((wh-2)); local daw=$((ww-2)); local scdc=$((daw-1)); local taw=$((scdc-1)); local -n ilr="$ian"; local ni=${#ilr[@]}; local idi; for idi ({0..$((dah-1))}) { local aii=$((so+idi)); local dr=$((idi+1)); if ((aii>=ni)) { zcurses move "$wn" $dr 1; zcurses string "$wn" "${(pl.$taw.. .)}"; continue; fi; local ik="${ilr[$((aii+1))]}"; local -n idr="menu_item_${ik}"; local it="${idr[title]:-$ik}"; local pfx=""; if [[ -n "${idr[submenu_ref]}" ]] { zcurses attr_on "$wn" "$(zcurses color_pair 4)" A_BOLD; pfx="→ "; zcurses attr_off "$wn" "$(zcurses color_pair 4)" A_BOLD; } else pfx="  "; fi; local idtr="$pfx$it"; local mlfi=$((taw)); local idt="$idtr"; if ((${#idtr}>mlfi && mlfi>0)) idt="${idtr[1,$mlfi]}"; zcurses move "$wn" $dr 1; if ((aii==ci)) { zcurses attr_on "$wn" "$(zcurses color_pair 2)"; zcurses string "$wn" "$idt"; zcurses attr_off "$wn" "$(zcurses color_pair 2)"; } else { zcurses attr_on "$wn" "$(zcurses color_pair 1)"; zcurses string "$wn" "$idt"; zcurses attr_off "$wn" "$(zcurses color_pair 1)"; } local cl=$((taw-${#idt})); if ((cl>0)) zcurses string "$wn" "${(pl.$cl.. .)}"; }; if ((ni>dah)) { zcurses attr_on "$wn" "$(zcurses color_pair 1)"; zcurses move "$wn" 1 $scdc; zcurses string "$wn" "$MENU_SCROLLBAR_UP_ARROW"; local tal=$((dah-2)); if ((tal<0)) tal=0; for ri ({1..$tal}) { zcurses move "$wn" $((ri+1)) $scdc; zcurses string "$wn" "$MENU_SCROLLBAR_TRACK_CHAR"; }; zcurses move "$wn" $dah $scdc; zcurses string "$wn" "$MENU_SCROLLBAR_DOWN_ARROW"; zcurses attr_off "$wn" "$(zcurses color_pair 1)"; local thh=$(((dah*tal)/ni)); if ((thh==0 && ni>0)) thh=1; if ((ni<=dah)) thh=$tal; if ((thh>tal && tal>0)) thh=$tal; local thyr=0; if ((ni>dah)) thyr=$(((so*tal)/(ni-dah))); if ((thyr<0)) thyr=0; if ((thyr+thh>tal && tal>0)) thyr=$((tal-thh)); if ((thyr<0)) thyr=0; local athyw=$((thyr+1+1)); zcurses attr_on "$wn" "$(zcurses color_pair 5)"; for t ({0..$((thh-1))}) { local thdr=$((athyw+t)); if ((thdr>1 && thdr<dah+1)) { zcurses move "$wn" $thdr $scdc; zcurses string "$wn" "$MENU_SCROLLBAR_THUMB_CHAR"; }}; zcurses attr_off "$wn" "$(zcurses color_pair 5)"; } }
 
-# --- Core Dialog Interaction Handler ---
-_handle_interactive_dialog() {
-    local -n di_ref="$1" 
-    local cr=${di_ref[content_start_row]}; local cc=${di_ref[content_start_col]}
-    local dih=${di_ref[dialog_inner_height]}; local diw=${di_ref[dialog_inner_width]}
-    local msg_txt="${di_ref[message]:-}"; local p_txt="${di_ref[prompt_text]:-}"
-    local curr_in_val="${di_ref[initial_value]:-}"; local f_width=${di_ref[field_width]:-0}
-    local btns_arr_name="${di_ref[buttons_array_name]:-}"; local -a btns_ref
-    if [[ -n "$btns_arr_name" ]]; then eval "btns_ref=(\"\${(@P)btns_arr_name}\")"; fi
-    local dialog_type="${di_ref[dialog_type]:-general}"
-
-    local has_msg=$([[ -n "$msg_txt" ]]); local has_input=$([[ -n "$p_txt" ]])
-    local curr_focus="message"; if $has_input; then curr_focus="input"; elif [[ "$dialog_type" == "file_picker" ]]; then curr_focus="file_list"; elif (( ${#btns_ref[@]} > 0 )); then curr_focus="buttons"; fi
-    if ! $has_msg && ! $has_input && (( ${#btns_ref[@]} == 0 )) && [[ "$dialog_type" != "file_picker" ]]; then return 1; fi
-    
-    local focused_btn_idx=0; local cur_pos=${#curr_in_val}
-    if (( f_width <= 0 && has_input )); then f_width=10; fi
-    # Initial cursor state set before calling _handle_interactive_dialog by show_dialog
-
-    local fp_current_path="${di_ref[initial_path]:-${PWD}}"
-    local -a fp_list_display=()
-    local fp_selected_idx=0; local fp_scroll_offset=0
-    local fp_list_start_row=$((cr + 1)); local fp_list_height=$((dih - 2)); local fp_max_visible=$fp_list_height
-    local num_fp_list_items=0
-
-    if [[ "$dialog_type" == "file_picker" ]]; then
-        _file_picker_list_files "$fp_current_path" fp_list_display
-        num_fp_list_items=${#fp_list_display[@]}
-    fi
-    
-    integer k_code
-    # Initial draw of content before loop (buttons are drawn inside loop by _draw_buttons)
-    if [[ "$curr_focus" == "input" ]]; then zcurses_curs_set 1; else zcurses_curs_set 0; fi
-
-    zcurses_attr_on "$(zcurses_color_pair 1)" # Default dialog content bg
-    if $has_msg && [[ "$dialog_type" != "file_picker" ]]; then _draw_message_content $cr $cc $diw "$msg_txt" $dih; fi
-    if $has_input && [[ "$dialog_type" != "file_picker" ]]; then
-        local f_start_r=$((cr + (dih-1-(${#btns_ref[@]}>0?1:0))/2)); if $has_msg; f_start_r=$((cr+2)); fi; if ((${#btns_ref[@]}>0)) && ! $has_msg; f_start_r=$((cr+1)); fi
-        zcurses_mvaddstr $f_start_r $cc "$p_txt"; local f_disp_c=$((cc+${#p_txt}+1))
-        zcurses_attr_on "$(zcurses_color_pair 5)"; zcurses_mvaddstr $f_start_r $f_disp_c "${(pl.$f_width.. .)}"; zcurses_mvaddstr $f_start_r $f_disp_c "$curr_in_val"; zcurses_attr_off "$(zcurses_color_pair 5)"
-        if [[ "$curr_focus" == "input" ]]; then zcurses_move $f_start_r $((f_disp_c+cur_pos)); fi
-    fi
-    zcurses_attr_off "$(zcurses_color_pair 1)"
-    if (( ${#btns_ref[@]} > 0 )); then _draw_buttons $cr $cc $diw "btns_ref" $focused_btn_idx $dih; fi
-    # File picker list is drawn inside the loop as it's interactive
-
-    while true; do
-        # Redraw dynamic parts inside loop
-        if [[ "$dialog_type" == "file_picker" ]]; then
-            zcurses_attr_on "$(zcurses_color_pair 1)"
-            local path_display_line="${(Mr.$((diw-2))...%)[Path: $fp_current_path]}"
-            zcurses_mvaddstr $cr $((cc+1)) "$path_display_line"
-            for i in {0..$((fp_max_visible-1))}; do
-                local actual_idx=$((fp_scroll_offset + i)); local screen_row=$((fp_list_start_row + i))
-                if (( actual_idx < num_fp_list_items )); then
-                    local item_d="${fp_list_display[$((actual_idx+1))]}"
-                    local list_item_color_pair=7; if [[ "$item_d" == */ || "$item_d" == ".." ]]; then list_item_color_pair=8; fi
-                    zcurses_attr_on "$(zcurses_color_pair $list_item_color_pair)"
-                    if (( actual_idx == fp_selected_idx && curr_focus == "file_list" )); then zcurses_attr_on A_REVERSE; fi
-                    zcurses_mvaddstr $screen_row $((cc+1)) "${(Mr.$((diw-2))...%)[$item_d]}"
-                    zcurses_attr_off A_REVERSE "$(zcurses_color_pair $list_item_color_pair)"
-                else zcurses_mvaddstr $screen_row $((cc+1)) "${(pl.$((diw-2))... .)}"; fi
-            done
-            if (( num_fp_list_items > fp_max_visible )); then # File Picker Scrollbar
-                local fp_sbar_col=$((cc + diw -1))
-                for r_idx in {0..$((fp_max_visible-1))}; do zcurses_mvaddstr $((fp_list_start_row + r_idx)) $fp_sbar_col "$SCROLLBAR_TRACK_CHAR"; done
-                local fp_thumb_h=$(( (fp_max_visible * fp_max_visible) / num_fp_list_items )); if ((fp_thumb_h==0)) fp_thumb_h=1; fi
-                local fp_thumb_p=$(( (fp_scroll_offset * fp_max_visible) / num_fp_list_items )); if ((fp_thumb_p<0)) fp_thumb_p=0; fi
-                if ((fp_thumb_p + fp_thumb_h > fp_max_visible)) fp_thumb_p=$((fp_max_visible - fp_thumb_h)); if ((fp_thumb_p<0)) fp_thumb_p=0; fi
-                for t in {0..$((fp_thumb_h-1))}; do local ctr=$((fp_list_start_row + fp_thumb_p + t)); if ((ctr < fp_list_start_row + fp_max_visible)) { zcurses_attr_on "$(zcurses_color_pair 5)"; zcurses_mvaddstr $ctr $fp_sbar_col "$SCROLLBAR_THUMB_CHAR"; zcurses_attr_off "$(zcurses_color_pair 5)"; } done
-            fi
-            zcurses_attr_off "$(zcurses_color_pair 1)"
-             _draw_buttons $cr $cc $diw "btns_ref" $focused_btn_idx $dih # Redraw buttons too
-        elif $has_input; then # Redraw input field if it's the focus for cursor updates
-             zcurses_attr_on "$(zcurses_color_pair 1)"
-             local f_start_r=$((cr + (dih-1-(${#btns_ref[@]}>0?1:0))/2)); if $has_msg; f_start_r=$((cr+2)); fi; if ((${#btns_ref[@]}>0)) && ! $has_msg; f_start_r=$((cr+1)); fi
-             local f_disp_c=$((cc+${#p_txt}+1))
-             zcurses_attr_on "$(zcurses_color_pair 5)"; zcurses_mvaddstr $f_start_r $f_disp_c "${(pl.$f_width.. .)}"; zcurses_mvaddstr $f_start_r $f_disp_c "$curr_in_val"; zcurses_attr_off "$(zcurses_color_pair 5)"
-             if [[ "$curr_focus" == "input" ]]; then zcurses_move $f_start_r $((f_disp_c+cur_pos)); fi
-             zcurses_attr_off "$(zcurses_color_pair 1)"
-             _draw_buttons $cr $cc $diw "btns_ref" $focused_btn_idx $dih # Redraw buttons too
-        else # For message dialogs, buttons might need redraw if focus changes
-            _draw_buttons $cr $cc $diw "btns_ref" $focused_btn_idx $dih
-        fi
-        zcurses_refresh; zcurses_getch k_code
-
-        case $k_code in
-            $KEY_TAB)
-                if [[ "$dialog_type" == "file_picker" ]]; then
-                    if (( ${#btns_ref[@]} > 0 )); then if [[ "$curr_focus" == "file_list" ]]; then curr_focus="buttons"; focused_btn_idx=0; zcurses_curs_set 0; else curr_focus="file_list"; zcurses_curs_set 0; fi; fi
-                elif $has_input && (( ${#btns_ref[@]} > 0 )); then if [[ "$curr_focus" == "input" ]]; then curr_focus="buttons"; focused_btn_idx=0; zcurses_curs_set 0; else curr_focus="input"; zcurses_curs_set 1; fi
-                elif !$has_input && (( ${#btns_ref[@]} > 1 )); then ((focused_btn_idx = (focused_btn_idx + 1) % ${#btns_ref[@]})); fi;;
-            $KEY_ESC)
-                if [[ "$dialog_type" == "file_picker" && "$curr_focus" == "file_list" ]]; then
-                    if [[ "$fp_current_path" != "/" && "$fp_current_path" != "." && "$fp_current_path" != "" ]]; then fp_current_path="$(realpath -m "$fp_current_path/..")"; else return 1; fi 
-                else global_input_string=""; di_ref[result_value]=""; return 1; fi 
-                _file_picker_list_files "$fp_current_path" fp_list_display; num_fp_list_items=${#fp_list_display[@]}; fp_selected_idx=0; fp_scroll_offset=0; continue;;
-            *) 
-                if [[ "$dialog_type" == "file_picker" && "$curr_focus" == "file_list" ]]; then
-                    case $k_code in
-                        $KEY_UP) ((fp_selected_idx--)); if ((fp_selected_idx<0)) fp_selected_idx=$((num_fp_list_items-1)); fi; if ((fp_selected_idx < fp_scroll_offset)) fp_scroll_offset=$fp_selected_idx; fi; if ((fp_scroll_offset < 0)) fp_scroll_offset=0; fi;;
-                        $KEY_DOWN) ((fp_selected_idx++)); if ((fp_selected_idx >= num_fp_list_items)) fp_selected_idx=0; fi; if ((fp_selected_idx >= fp_scroll_offset + fp_max_visible)) fp_scroll_offset=$((fp_selected_idx - fp_max_visible + 1)); fi; local m_fp_so=$((num_fp_list_items-fp_max_visible)); if ((m_fp_so<0)) m_fp_so=0; fi; if ((fp_scroll_offset>m_fp_so)) fp_scroll_offset=$m_fp_so; fi;;
-                        $KEY_ENTER_LF | $KEY_ENTER_CR)
-                            if (( num_fp_list_items == 0 )); then continue; fi 
-                            local sel_item_disp="${fp_list_display[$((fp_selected_idx+1))]}"
-                            local sel_basename="${sel_item_disp%/}" 
-                            local new_path
-                            if [[ "$sel_item_disp" == "../" ]]; then new_path=$(realpath -m "$fp_current_path/..");
-                            elif [[ "$sel_item_disp" == */ ]]; then 
-                                if [[ "$fp_current_path" == "/" ]]; then new_path="/$sel_basename"; else new_path="$fp_current_path/$sel_basename"; fi
-                            else 
-                                if [[ "$fp_current_path" == "/" ]]; then di_ref[result_value]="/$sel_basename"; else di_ref[result_value]="$fp_current_path/$sel_basename"; fi
-                                curr_focus="buttons"; focused_btn_idx=0; for i ({1..${#btns_ref[@]}}) { if [[ "${btns_ref[$i]}" == "Select" ]]; then focused_btn_idx=$((i-1)); break; fi }; continue;
-                            fi
-                            if [[ -d "$new_path" ]]; then fp_current_path="$new_path"; else continue; fi
-                            _file_picker_list_files "$fp_current_path" fp_list_display; num_fp_list_items=${#fp_list_display[@]}; fp_selected_idx=0; fp_scroll_offset=0;;
-                    esac
-                elif [[ "$curr_focus" == "input" ]] && $has_input; then
-                    case $k_code in
-                        $KEY_ENTER_LF|$KEY_ENTER_CR) if ((${#btns_ref[@]}>0)) { curr_focus="buttons"; focused_btn_idx=0; zcurses_curs_set 0; } else { global_input_string="$curr_in_val"; di_ref[result_value]="$curr_in_val"; return 0; } fi;;
-                        $KEY_BACKSPACE) if ((cur_pos>0)) curr_in_val="${curr_in_val[1,$((cur_pos-1))]}${curr_in_val[$((cur_pos+1)),-1]}"; ((cur_pos--)); fi;;
-                        $KEY_DC) if ((cur_pos<${#curr_in_val})) curr_in_val="${curr_in_val[1,$cur_pos]}${curr_in_val[$((cur_pos+2)),-1]}"; fi;;
-                        $KEY_LEFT_ARROW) if ((cur_pos>0)) ((cur_pos--)); fi;;
-                        $KEY_RIGHT_ARROW) if ((cur_pos<${#curr_in_val})) ((cur_pos++)); fi;;
-                        *) if ((k_code>=32 && k_code<=126 && ${#curr_in_val}<f_width)) curr_in_val="${curr_in_val[1,$cur_pos]}$(printf \\$(printf '%03o' $k_code))${curr_in_val[$((cur_pos+1)),-1]}"; ((cur_pos++)); fi;;
-                    esac
-                elif [[ "$curr_focus" == "buttons" ]] && (( ${#btns_ref[@]} > 0 )); then
-                    case $k_code in
-                        $KEY_LEFT_ARROW) ((focused_btn_idx--)); if ((focused_btn_idx<0)) focused_btn_idx=$((${#btns_ref[@]}-1)); fi;;
-                        $KEY_RIGHT_ARROW) ((focused_btn_idx++)); if ((focused_btn_idx >= ${#btns_ref[@]})) focused_btn_idx=0; fi;;
-                        $KEY_ENTER_LF|$KEY_ENTER_CR) local sel_btn_lbl="${btns_ref[$((focused_btn_idx+1))]}"; if [[ "$sel_btn_lbl"=="OK"||"$sel_btn_lbl"=="Yes"||("$dialog_type"=="file_picker"&&"$sel_btn_lbl"=="Select") ]] { if $has_input { global_input_string="$curr_in_val"; di_ref[result_value]="$curr_in_val"; } if [[ "$dialog_type"=="file_picker" && -z "${di_ref[result_value]}" ]] continue; return 0; } elif [[ "$sel_btn_lbl"=="Cancel"||"$sel_btn_lbl"=="No" ]] { global_input_string=""; di_ref[result_value]=""; return 1; } else { di_ref[result_value]="$sel_btn_lbl"; return $((10+focused_btn_idx)); } fi;;
-                    esac
-                elif [[ "$curr_focus" == "message" ]]; then if ((k_code==$KEY_ENTER_LF || k_code==$KEY_ENTER_CR || k_code==$KEY_ESC)) return 1; fi;;
-        esac
-    done
-}
-
-_save_screen_region() { local r=$1; local c=$2; local h=$3; local w=$4; local -n b="$5"; b=(); for ro ({0..$((h-1))}) for co ({0..$((w-1))}) { local ra=$((r+ro)); local ca=$((c+co)); integer cav; zcurses_mvinch $ra $ca cav; b+=($cav); }; }
-_restore_screen_region() { local r=$1; local c=$2; local h=$3; local w=$4; local -n b="$5"; local bi=1; for ro ({0..$((h-1))}) for co ({0..$((w-1))}) { local ra=$((r+ro)); local ca=$((c+co)); if ((bi<=${#b[@]})) zcurses_mvaddch $ra $ca ${b[$bi]}; ((bi++)); }; }
-
-show_dialog() { 
-    local -n dialog_info_ref="$1"
-    local d_title="${dialog_info_ref[title]}"; local d_height=${dialog_info_ref[height]}; local d_width=${dialog_info_ref[width]}
-    integer term_h term_w; zcurses_getmaxyx term_h term_w
-    dialog_info_ref[start_row]=$(((term_h - d_height) / 2)); dialog_info_ref[start_col]=$(((term_w - d_width) / 2))
-    dialog_info_ref[content_start_row]=$((dialog_info_ref[start_row] + 1)); dialog_info_ref[content_start_col]=$((dialog_info_ref[start_col] + 1))
-    dialog_info_ref[dialog_inner_height]=$((d_height - 2)); dialog_info_ref[dialog_inner_width]=$((d_width - 2))
-
-    _save_screen_region ${dialog_info_ref[start_row]} ${dialog_info_ref[start_col]} $((d_height + 1)) $((d_width + 1)) "dialog_screen_backup_buffer"
-    _draw_shadow ${dialog_info_ref[start_row]} ${dialog_info_ref[start_col]} $d_height $d_width
-    # _draw_box is now animated, call it. Content is drawn by _handle_interactive_dialog AFTER box is done.
-    _draw_box ${dialog_info_ref[start_row]} ${dialog_info_ref[start_col]} $d_height $d_width "$d_title"
-    
-    local dialog_status=1; _handle_interactive_dialog "$1"; dialog_status=$?
-    
-    # Cursor visibility is managed by _handle_interactive_dialog, ensure it's off on exit.
-    zcurses_curs_set 0 
-    _restore_screen_region ${dialog_info_ref[start_row]} ${dialog_info_ref[start_col]} $((d_height + 1)) $((d_width + 1)) "dialog_screen_backup_buffer"
-    zcurses_refresh; return $dialog_status
-}
-
-show_confirmation_dialog() { local t="$1"; local m="$2"; local -n btns="$3"; typeset -A cdi; cdi[title]="$t"; cdi[message]="$m"; cdi[buttons_array_name]="$3"; cdi[dialog_type]="confirm"; local msg_l=${#m}; local num_b=${#btns[@]}; local max_b_w=0; if ((num_b>0)) for bl in "${btns[@]}"; do if ((${#bl}>max_b_w)) max_b_w=${#bl}; done; fi; local btns_w=0; if ((num_b>0)) btns_w=$((num_b*(max_b_w+4)+(num_b-1)*2)); fi; cdi[width]=$((msg_l>btns_w?msg_l+4:btns_w+4)); if ((cdi[width]<20)) cdi[width]=20; fi; integer tc ZCOLS; zcurses_getmaxyx tr tc; if ((cdi[width]>tc-4)) cdi[width]=$((tc-4)); fi; cdi[height]=$((2+1+(num_b>0?1:0)+1)); show_dialog "cdi"; return $?; }
-show_input_dialog() { local t="$1"; local p="$2"; local iv="$3"; local fw=$4; local -n btns="$5"; typeset -A idi; idi[title]="$t"; idi[prompt_text]="$p"; idi[initial_value]="$iv"; idi[field_width]=$fw; idi[buttons_array_name]="$5"; idi[dialog_type]="input"; local num_b=${#btns[@]}; local max_b_w=0; if ((num_b>0)) for bl in "${btns[@]}"; do if ((${#bl}>max_b_w)) max_b_w=${#bl}; done; fi; local btns_w=0; if ((num_b>0)) btns_w=$((num_b*(max_b_w+4)+(num_b-1)*2)); fi; local input_w=$((${#p}+1+fw)); idi[width]=$((input_w>btns_w?input_w+4:btns_w+4)); if ((idi[width]<30)) idi[width]=30; fi; integer tc ZCOLS; zcurses_getmaxyx tr tc; if ((idi[width]>tc-4)) idi[width]=$((tc-4)); fi; idi[height]=$((2+1+(num_b>0?1:0)+1)); show_dialog "idi"; return $?; }
-show_file_picker_dialog() { local t="$1"; local ip="${2:-${PWD}}"; typeset -A fpd_info; fpd_info[title]="$t"; fpd_info[initial_path]="$ip"; fpd_info[dialog_type]="file_picker"; local -a fp_btns=("Select" "Cancel"); fpd_info[buttons_array_name]="fp_btns"; fpd_info[height]=15; fpd_info[width]=60; integer tc ZCOLS; zcurses_getmaxyx tr tc; if ((fpd_info[width]>tc-4)) fpd_info[width]=$((tc-4)); fi; show_dialog "fpd_info"; global_file_picker_result="${fpd_info[result_value]:-}"; return $?; }
-
-push_menu() { local m="$1"; if [[ -z "$m" ]] return 1; eval "state_${current_menu_array_name}[current_selection_idx]=$current_selection_idx"; eval "state_${current_menu_array_name}[scroll_offset]=$scroll_offset"; menu_stack+=("$current_menu_array_name"); current_menu_array_name="$m"; if eval "[[ -n \${state_${current_menu_array_name}[current_selection_idx]+_} ]]"; then eval "current_selection_idx=\${state_${current_menu_array_name}[current_selection_idx]}"; eval "scroll_offset=\${state_${current_menu_array_name}[scroll_offset]}"; else eval "typeset -A state_${current_menu_array_name}=(current_selection_idx=0 scroll_offset=0)"; current_selection_idx=0; scroll_offset=0; fi; unset multi_selected_states; typeset -A multi_selected_states; return 0; }
-pop_menu() { if (( ${#menu_stack[@]} == 0 )) return 1; current_menu_array_name="${menu_stack[-1]}"; menu_stack[-1]=(); eval "current_selection_idx=\${state_${current_menu_array_name}[current_selection_idx]}"; eval "scroll_offset=\${state_${current_menu_array_name}[scroll_offset]}"; unset multi_selected_states; typeset -A multi_selected_states; return 0; }
-
-display_menu() { zcurses_clear; zcurses_attr_on "$(zcurses_color_pair 1)"; local -n cri="$current_menu_array_name"; local c=2; local nit=${#cri[@]}; for idi ({0..$((max_visible_items-1))}) { localaii=$((scroll_offset+idi)); local sr=$((idi+1)); if ((aii<nit)) { local in="${cri[$((aii+1))]}"; local tivn="menu_item_${in}[title]"; local it="${(P)tivn}"; if [[ -z "$it" ]] it="$in"; fi; local subr="${(P)menu_item_${in}[submenu]}"; local pfx=""; if [[ -n "$subr" ]] { zcurses_attr_on "$(zcurses_color_pair 4)" A_BOLD; pfx="→ "; zcurses_attr_off "$(zcurses_color_pair 4)" A_BOLD; } local idt; if [[ -n "${multi_selected_states[$aii]}" ]] idt="$pfx[x] $it"; else idt="$pfx[ ] $it"; fi; local miw=$((scrollbar_col-c-${#pfx}-3)); if ((${#it}>miw && miw>0)) { if [[ -n "${multi_selected_states[$aii]}" ]] idt="$pfx[x] ${it[1,miw]}…"; else idt="$pfx[ ] ${it[1,miw]}…"; fi; } if ((aii==current_selection_idx)) { zcurses_attr_on A_REVERSE; zcurses_mvaddstr $sr $c "$idt"; zcurses_attr_off A_REVERSE; } else { zcurses_attr_on "$(zcurses_color_pair 1)"; zcurses_mvaddstr $sr $c "$idt"; zcurses_attr_off "$(zcurses_color_pair 1)"; }} else zcurses_mvaddstr $sr $c "$(printf '%*s' $((scrollbar_col-c)) '')"; fi; }; zcurses_attr_on "$(zcurses_color_pair 1)"; zcurses_mvaddstr 0 $scrollbar_col "$SCROLLBAR_UP_ARROW"; for r ({1..$max_visible_items}) zcurses_mvaddstr $r $scrollbar_col "$SCROLLBAR_TRACK_CHAR"; zcurses_mvaddstr $((max_visible_items+1)) $scrollbar_col "$SCROLLBAR_DOWN_ARROW"; zcurses_attr_off "$(zcurses_color_pair 1)"; integer th=1; integer tp=0; if ((nit>0)) { if ((nit<=max_visible_items)) { th=$max_visible_items; tp=0; } else { th=$(((max_visible_items*max_visible_items)/nit)); if ((th==0)) th=1; fi; tp=$(((scroll_offset*max_visible_items)/nit)); if ((tp<0)) tp=0; fi; }} if ((tp+th>max_visible_items)) { tp=$((max_visible_items-th)); if ((tp<0)) tp=0; fi; } for t ({0..$((th-1))}) { local ctr=$((1+tp+t)); if ((ctr<=max_visible_items)) { zcurses_attr_on "$(zcurses_color_pair 5)"; zcurses_mvaddstr $ctr $scrollbar_col "$SCROLLBAR_THUMB_CHAR"; zcurses_attr_off "$(zcurses_color_pair 5)"; }}; zcurses_attr_on "$(zcurses_color_pair 1)"; integer termh termw; zcurses_getmaxyx termh termw; zcurses_mvaddstr $((termh-1)) 2 "Arrows: Nav | Space: Toggle | Enter: Action | Esc: Back | q: Quit"; zcurses_attr_off "$(zcurses_color_pair 1)"; }
-
-eval "current_selection_idx=\${state_main_menu_items[current_selection_idx]}"; eval "scroll_offset=\${state_main_menu_items[scroll_offset]}"; display_menu
-
+_push_menu "main_menu_items_ref"
 while true; do
-    display_menu; zcurses_refresh; integer k_code; zcurses_getch k_code
-    local -n cri="$current_menu_array_name"; local nit=${#cri[@]}
-    case $k_code in
-        $KEY_UP) ((current_selection_idx--)); if ((current_selection_idx<0)) current_selection_idx=$((nit-1)); fi; if ((current_selection_idx<scroll_offset)) scroll_offset=$current_selection_idx; fi; if ((scroll_offset<0)) scroll_offset=0; fi;;
-        $KEY_DOWN) ((current_selection_idx++)); if ((current_selection_idx>=nit)) current_selection_idx=0; fi; if ((current_selection_idx>=scroll_offset+max_visible_items)) scroll_offset=$((current_selection_idx-max_visible_items+1)); fi; local mso=$((nit-max_visible_items)); if ((mso<0)) mso=0; fi; if ((scroll_offset>mso)) scroll_offset=$mso; fi;;
-        $KEY_SPACEBAR) if [[ -n "${multi_selected_states[$current_selection_idx]}" ]] unset multi_selected_states[$current_selection_idx]; else multi_selected_states[$current_selection_idx]=1; fi;;
-        $KEY_ENTER_LF | $KEY_ENTER_CR)
-            local cin="${cri[$((current_selection_idx+1))]}"; local subr="${(P)menu_item_${cin}[submenu]}"; local actr="${(P)menu_item_${cin}[action]}"; local titr="${(P)menu_item_${cin}[title]}"
-            if [[ -n "$subr" ]] push_menu "$subr"
-            elif [[ "$actr" == "test_input_dialog" ]]; then local -a ib=("OK" "Cancel"); show_input_dialog "User Input" "Enter nickname:" "ZshFan" 25 "ib"; local is=$?; local rm; if ((is==0)) rm="OK: $global_input_string"; else rm="Cancel. Input: $global_input_string"; fi; zcurses_mvaddstr 0 0 "${(pl.70.. .)}"; zcurses_mvaddstr 0 0 "$rm"; zcurses_refresh; zcurses_napms 2000; global_input_string="";
-            elif [[ "$actr" == "test_confirm_dialog" ]]; then local -a cb=("Yes" "No" "Maybe"); show_confirmation_dialog "Confirm Action" "Are you sure?" "cb"; local ch=$?; local cm; if ((ch==0)) cm="Confirmed (Yes/OK)"; elif ((ch==1)) cm="Cancelled (No/Cancel/Esc)"; elif ((ch==10)) cm="Chose: ${cb[1]}"; elif ((ch==11)) cm="Chose: ${cb[2]}"; elif ((ch==12)) cm="Chose: ${cb[3]}"; else cm="Unknown: $ch"; fi; zcurses_mvaddstr 1 0 "${(pl.70.. .)}"; zcurses_mvaddstr 1 0 "$cm"; zcurses_refresh; zcurses_napms 2000;
-            elif [[ "$actr" == "test_file_picker_dialog_action" ]]; then show_file_picker_dialog "Select File" "$(pwd)"; local fs=$?; local fm; if ((fs==0 && -n "$global_file_picker_result" )) fm="Selected: $global_file_picker_result"; elif ((fs==0 && -z "$global_file_picker_result" )) fm="Selected: (selection cleared or no file chosen)"; else fm="File selection cancelled."; fi; zcurses_mvaddstr 2 0 "${(pl.70.. .)}"; zcurses_mvaddstr 2 0 "$fm"; zcurses_refresh; zcurses_napms 3000; global_file_picker_result="";
-            elif [[ "$titr" == "Back to Main Menu" ]] pop_menu
-            elif [[ "$cin" == "ExitProgram" ]] break;;
-        $KEY_ESC) if ! pop_menu; then : ; fi;;
-        $KEY_D_LOWER) local -a ib=("OK" "Cancel"); show_input_dialog "Direct Test Input" "Enter value:" "" 20 "ib"; local is=$?; local rm; if ((is==0)) rm="OK: $global_input_string"; else rm="Cancel. Input: $global_input_string"; fi; zcurses_mvaddstr 0 0 "${(pl.70.. .)}"; zcurses_mvaddstr 0 0 "$rm"; zcurses_refresh; zcurses_napms 2000; global_input_string="";;
-        $KEY_C_LOWER) local -a cb=("Proceed" "Abort"); show_confirmation_dialog "Direct Test Confirm" "Confirm op?" "cb"; local ch=$?; local cm; if ((ch==0)) cm="Confirmed: ${cb[1]}"; elif ((ch==1)) cm="Cancelled: ${cb[2]}"; elif ((ch==10)) cm="Chose: ${cb[1]}"; elif ((ch==11)) cm="Chose: ${cb[2]}"; else cm="Unknown: $ch"; fi; zcurses_mvaddstr 1 0 "${(pl.70.. .)}"; zcurses_mvaddstr 1 0 "$cm"; zcurses_refresh; zcurses_napms 2000;;
-        $KEY_F_LOWER) show_file_picker_dialog "Test From Key" "$(pwd)"; local fs=$?; local fm; if ((fs==0 && -n "$global_file_picker_result")) fm="Picked: $global_file_picker_result"; elif ((fs==0 && -z "$global_file_picker_result" )) fm="Selected: (selection cleared or no file chosen)"; else fm="Picker cancelled."; fi; zcurses_mvaddstr 2 0 "${(pl.70.. .)}"; zcurses_mvaddstr 2 0 "$fm"; zcurses_refresh; zcurses_napms 3000; global_file_picker_result="";;
-
-        $KEY_Q_LOWER) break;;
-    esac
-done
-
-zcurses_endwin
-exit 0
+    if [[ -z "$active_menu_items_arr_name" ]] { if ! _pop_menu && ((${#menu_window_stack[@]}==0)) break; else continue; fi; }; _display_menu_in_window "$active_menu_win_name" "$active_menu_items_arr_name" "$active_menu_current_idx" "$active_menu_scroll_offset"; zcurses refresh "$active_menu_win_name"; typeset char keycode; if ! zcurses input "$active_menu_win_name" char keycode 0 break; fi; if [[ "$char"=="q" ]] break; local -n crilr="$active_menu_items_arr_name"; local ncil=${#crilr[@]}; local cwh; zcurses getmaxyx "$active_menu_win_name" cwh cww; local cmv=$((cwh-2)); case "$keycode" in $KEY_UP_CODE) ((active_menu_current_idx--)); if ((active_menu_current_idx<0)) active_menu_current_idx=$((ncil-1)); fi; if ((active_menu_current_idx<active_menu_scroll_offset)) active_menu_scroll_offset=$active_menu_current_idx; fi; if ((active_menu_scroll_offset<0)) active_menu_scroll_offset=0; fi;; $KEY_DOWN_CODE) ((active_menu_current_idx++)); if ((active_menu_current_idx>=ncil)) active_menu_current_idx=0; fi; if ((active_menu_current_idx>=active_menu_scroll_offset+cmv)) active_menu_scroll_offset=$((active_menu_current_idx-cmv+1)); fi; local msl=$((ncil-cmv)); if ((msl<0)) msl=0; fi; if ((active_menu_scroll_offset>msl)) active_menu_scroll_offset=$msl; fi;; $KEY_ESC) if ! _pop_menu; then :; fi;; *) if [[ "$char"=="$(printf \\r)"||"$char"=="$(printf \\n)" ]] { local sik="${crilr[$((active_menu_current_idx+1))]}"; local -n sidr="menu_item_${sik}"; if [[ -n "${sidr[submenu_ref]}" ]] _push_menu "${sidr[submenu_ref]}"; elif [[ "${sidr[title]}"=="Exit Program" ]] break; elif [[ "${sidr[title]}"=="Back" ]] { if ! _pop_menu; then :; fi; } elif [[ "${sidr[action]}"=="test_input_dialog_action" ]] { local -a ib=("OK" "Cancel"); show_input_dialog_new "User Input" "Nickname:" "ZshFan" 25 "ib"; local is=$?; _display_menu_in_window "$active_menu_win_name" "$active_menu_items_arr_name" "$active_menu_current_idx" "$active_menu_scroll_offset"; zcurses refresh "$active_menu_win_name"; zcurses move stdscr 0 0; zcurses string stdscr "Input Dlg: $is. Val: '$global_input_string'${(pl.$((COLUMNS-30)).. .)}"; zcurses refresh stdscr; zcurses_delay_output 2000; } elif [[ "${sidr[action]}"=="test_confirm_dialog_action" ]] { local -a cb=("Yes" "No"); local cbn="cb"; show_confirmation_dialog_new "Confirm" "Proceed?" "$cbn"; local ch=$?; _display_menu_in_window "$active_menu_win_name" "$active_menu_items_arr_name" "$active_menu_current_idx" "$active_menu_scroll_offset"; zcurses refresh "$active_menu_win_name"; zcurses move stdscr 1 0; zcurses string stdscr "Confirm Dlg: $ch. Btn: '${cb[$((ch+1))]}'${(pl.$((COLUMNS-30)).. .)}"; zcurses refresh stdscr; zcurses_delay_output 2000; } elif [[ "${sidr[action]}"=="test_file_picker_dialog_action" ]] { show_file_picker_dialog_new "Select File" "$(pwd)"; local fs=$?; _display_menu_in_window "$active_menu_win_name" "$active_menu_items_arr_name" "$active_menu_current_idx" "$active_menu_scroll_offset"; zcurses refresh "$active_menu_win_name"; zcurses move stdscr 2 0; zcurses string stdscr "FilePicker Dlg: $fs. File: '$global_file_picker_result'${(pl.$((COLUMNS-40)).. .)}"; zcurses refresh stdscr; zcurses_delay_output 3000; } fi; } esac; done
+if [[ -n "$active_menu_win_name" ]] zcurses delwin "$active_menu_win_name"; fi; local wtd; for wtd ("${menu_window_stack[@]}") { if [[ -n "$wtd" ]] zcurses delwin "$wtd"; fi; }; echoti cnorm; zcurses end; exit 0
